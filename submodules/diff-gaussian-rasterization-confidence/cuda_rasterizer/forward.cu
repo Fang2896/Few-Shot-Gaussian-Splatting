@@ -238,13 +238,17 @@ __global__ void preprocessCUDA(int P, int D, int M,
 
 	// If colors have been precomputed, use them, otherwise convert
 	// spherical harmonics coefficients to RGB color.
+  // FIX: 数据预处理的时候，也要加上color和shs均为0的情况，而且这边可以省时间
 	if (colors_precomp == nullptr)
 	{
-		glm::vec3 result = computeColorFromSH(idx, D, M, (glm::vec3*)orig_points, *cam_pos, shs, clamped);
+		glm::vec3 result = shs == nullptr ?
+      glm::vec3(0.0) :
+      computeColorFromSH(idx, D, M, (glm::vec3*)orig_points, *cam_pos, shs, clamped);
+
 		rgb[idx * C + 0] = result.x;
 		rgb[idx * C + 1] = result.y;
 		rgb[idx * C + 2] = result.z;
-	}
+	} 
 
 	// Store some useful helper data for the next steps.
 	depths[idx] = p_view.z;
@@ -258,6 +262,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 // Main rasterization method. Collaboratively works on one tile per
 // block, each thread treats one pixel. Alternates between fetching 
 // and rasterizing data.
+// TODO: 5. 加上feature_ptr 为 nullptr 时候的情况
 template <uint32_t CHANNELS>
 __global__ void __launch_bounds__(BLOCK_X * BLOCK_Y)
 renderCUDA(
@@ -355,9 +360,15 @@ renderCUDA(
 			}
 
 			// Eq. (3) from 3D Gaussian splatting paper.
-			for (int ch = 0; ch < CHANNELS; ch++)
-				C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
+      // TODO: 6. features为nullptr，即没有给定color以及shs，故直接跳过
+      if(features != nullptr) 
+      {
+        for (int ch = 0; ch < CHANNELS; ch++)
+				  C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
+      }
+			
 			weight += alpha * T;
+      // 核心是这个，计算depths才是重点
 			D += depths[collected_id[j]] * alpha * T;
 
 			T = test_T;
@@ -376,7 +387,7 @@ renderCUDA(
 		for (int ch = 0; ch < CHANNELS; ch++)
 			out_color[ch * H * W + pix_id] = C[ch] + T * bg_color[ch];
 		out_alpha[pix_id] = weight; //1 - T;
-		out_depth[pix_id] = D;
+		out_depth[pix_id] = D;  // 重点是这个
 	}
 }
 
@@ -386,7 +397,7 @@ void FORWARD::render(
 	const uint32_t* point_list,
 	int W, int H,
 	const float2* means2D,
-	const float* colors,
+	const float* colors,  // 就是feature_ptr
 	const float* depths,
 	const float4* conic_opacity,
 	float* out_alpha,

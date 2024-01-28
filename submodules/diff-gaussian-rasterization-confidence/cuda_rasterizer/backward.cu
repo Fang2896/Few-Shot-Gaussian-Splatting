@@ -503,8 +503,11 @@ renderCUDA(
 			collected_id[block.thread_rank()] = coll_id;
 			collected_xy[block.thread_rank()] = points_xy_image[coll_id];
 			collected_conic_opacity[block.thread_rank()] = conic_opacity[coll_id];
+      // TODO: 如果是给了nullptr，则直接赋值0就行，主要是防止数组越界！
 			for (int i = 0; i < C; i++)
-				collected_colors[i * BLOCK_SIZE + block.thread_rank()] = colors[coll_id * C + i];
+				collected_colors[i * BLOCK_SIZE + block.thread_rank()] = 
+          colors == nullptr ? 0.0 : colors[coll_id * C + i];
+
 			collected_depths[block.thread_rank()] = depths[coll_id];
 		}
 		block.sync();
@@ -540,6 +543,7 @@ renderCUDA(
 			// pair).
 			float dL_dopa = 0.0f;
 			const int global_id = collected_id[j];
+      // 这里不用管，反正collected_color已经是 0 了
 			for (int ch = 0; ch < C; ch++)
 			{
 				const float c = collected_colors[ch * BLOCK_SIZE + j];

@@ -202,9 +202,11 @@ int CudaRasterizer::Rasterizer::forward(
 	const float* background,
 	const int width, int height,
 	const float* means3D,
+
 	const float* shs,
 	const float* colors_precomp,
-	const float* opacities,
+	
+  const float* opacities,
 	const float* scales,
 	const float scale_modifier,
 	const float* rotations,
@@ -246,6 +248,7 @@ int CudaRasterizer::Rasterizer::forward(
 	}
 
 	// Run preprocessing per-Gaussian (transformation, bounding, conversion of SHs to RGB)
+  // TODO: 3. 现在如果shs和color都是nullptr，则返回出的geomState.rgb为 (0,0,0)
 	CHECK_CUDA(FORWARD::preprocess(
 		P, D, M,
 		means3D,
@@ -319,7 +322,14 @@ int CudaRasterizer::Rasterizer::forward(
 	CHECK_CUDA(, debug);
 
 	// Let each tile blend its range of Gaussians independently in parallel
+  // TODO: 4. 原来的逻辑是：如果color_precomp不为nullptr则直接用，否则用shs计算出的geomState.rgb
+  // 但我们再加一种情况，就是两者都是nullptr的情况
 	const float* feature_ptr = colors_precomp != nullptr ? colors_precomp : geomState.rgb;
+  if(colors_precomp == nullptr && shs == nullptr) 
+  {
+    feature_ptr = nullptr;
+  }
+
 	CHECK_CUDA(FORWARD::render(
 		tile_grid, block,
 		imgState.ranges,
@@ -394,6 +404,10 @@ void CudaRasterizer::Rasterizer::backward(
 	// opacity and RGB of Gaussians from per-pixel loss gradients.
 	// If we were given precomputed colors and not SHs, use them.
 	const float* color_ptr = (colors_precomp != nullptr) ? colors_precomp : geomState.rgb;
+  if(colors_precomp == nullptr && shs == nullptr) 
+  {
+    color_ptr = nullptr;
+  }
 	const float* depth_ptr = geomState.depths;
 	CHECK_CUDA(BACKWARD::render(
 		tile_grid,
